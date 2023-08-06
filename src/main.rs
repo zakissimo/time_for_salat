@@ -1,4 +1,5 @@
 use reqwest::blocking::Client;
+use chrono::{NaiveTime, Local};
 use select::document::Document;
 use select::predicate::Name;
 use serde::Deserialize;
@@ -6,19 +7,12 @@ use serde_json;
 use std::fmt;
 // use chrono::DateTime;
 
-fn fetch() -> String {
+fn fetch() -> Result<reqwest::blocking::Response, reqwest::Error> {
     let url = "https://mawaqit.net/fr/m-angouleme";
     // let url = "https://mawaqit.net/fr/mosquee-dagen";
 
     let client = Client::new();
-    let r = client.get(url).send();
-    match r {
-        Ok(r) => match r.text() {
-            Ok(body) => body,
-            Err(_) => "Error while decoding the response to text.".to_string(),
-        },
-        Err(_) => "Error while sending request.".to_string(),
-    }
+    return client.get(url).send();
 }
 
 #[derive(Debug, Deserialize)]
@@ -30,20 +24,6 @@ struct Data {
     jumua: String,
     jumuaAsDuhr: bool,
     shuruq: String,
-}
-
-impl Data {
-    fn default() -> Data {
-        Data {
-            times: Default::default(),
-            name: Default::default(),
-            localisation: Default::default(),
-            email: Default::default(),
-            jumua: Default::default(),
-            jumuaAsDuhr: Default::default(),
-            shuruq: Default::default(),
-        }
-    }
 }
 
 impl fmt::Display for Data {
@@ -69,8 +49,7 @@ impl fmt::Display for Data {
     }
 }
 
-fn parse(doc: Document) -> Data {
-    let mut data: Data = Data::default();
+fn parse(doc: Document) -> Result<Data, String> {
     for element in doc.find(Name("script")) {
         if element.inner_html().contains("var confData") {
             let line = element.inner_html();
@@ -81,18 +60,67 @@ fn parse(doc: Document) -> Data {
                     .trim_start_matches("var confData = ")
                     .trim_end_matches(";");
                 if json_string.starts_with("{") {
-                    data = serde_json::from_str(json_string).unwrap();
+                    let data : Result<Data, serde_json::Error> = serde_json::from_str(json_string);
+                    match data {
+                        Ok(data) => return Ok(data),
+                        Err(_) => return Err("Couldn't parse html response!".to_string()),
+                    }
                 }
             }
         }
     }
-    data
+    Err("Couldn't parse html response!".to_string())
+}
+
+fn get_remaining_time(data: Data) -> String {
+    let now = Local::now().time();
+
+    let remaining_time = data
+        .times
+        .into_iter()
+        .filter_map(|time| NaiveTime::parse_from_str(&time, "%H:%M").ok()) // Filter out invalid times
+        .filter(|&time| time > now) // Filter times that are greater than the current time
+        .fold(None, |closest_time, time| {
+            // Calculate the closest time to the current time
+            match closest_time {
+                Some(prev_time) => {
+                    if time < prev_time {
+                        Some(time)
+                    } else {
+                        Some(prev_time)
+                    }
+                }
+                None => Some(time),
+            }
+        });
+
+    match remaining_time {
+        Some(time) => {
+            let duration = time.signed_duration_since(now);
+            format!("{}:{:02}", duration.num_hours(), duration.num_minutes() % 60)
+        }
+        None => "??:??".to_string(),
+    }
 }
 
 fn main() {
-    let body = fetch();
-    let doc = Document::from(body.as_str());
-    let data: Data = parse(doc);
+    let r = fetch();
+    match r {
+        Ok(r) => match r.text() {
+            Ok(body) => {
+                let doc = Document::from(body.as_str());
+                let data = parse(doc);
+                match data {
+                    Ok(data) =>  {
+                        let s = get_remaining_time(data);
+                        println!("{s}");
 
-    println!("{data}");
+                    },
+                    Err(_) => eprintln!("Error while parsing the document."),
+                }
+            },
+            Err(_) => eprintln!("Error while decoding the response to text."),
+        },
+        Err(_) => eprintln!("Error while sending request."),
+    };
 }
