@@ -20,6 +20,53 @@ struct Data {
     shuruq: String,
 }
 
+impl Data {
+    fn update(&self) -> Result<(), std::io::Error> {
+        let now = Local::now().format("%d/%m/%y").to_string();
+        let content = now + "\n" + &serde_json::to_string(&self)?;
+
+        OpenOptions::new()
+            .write(true)
+            .create(true)
+            .open(FILE_PATH)?
+            .write_all(content.as_bytes())?;
+
+        Ok(())
+    }
+
+    fn get_remaining_time(self) -> String {
+        let now = Local::now().time();
+
+        let remaining_time = self
+            .times
+            .into_iter()
+            .filter_map(|time| NaiveTime::parse_from_str(&time, "%H:%M").ok()) // Filter out invalid times
+            .filter(|&time| time > now)
+            .fold(None, |closest_time, time| match closest_time {
+                Some(prev_time) => {
+                    if time < prev_time {
+                        Some(time)
+                    } else {
+                        Some(prev_time)
+                    }
+                }
+                None => Some(time),
+            });
+
+        match remaining_time {
+            Some(time) => {
+                let duration = time.signed_duration_since(now);
+                format!(
+                    "{}:{:02}",
+                    duration.num_hours(),
+                    duration.num_minutes() % 60
+                )
+            }
+            None => "??:??".to_string(),
+        }
+    }
+}
+
 static FILE_PATH: &str = "/dev/shm/Time4Salat.log";
 
 impl fmt::Display for Data {
@@ -60,7 +107,7 @@ fn parse_data(doc: Document) -> Result<Data, String> {
                     let data: Result<Data, serde_json::Error> = serde_json::from_str(json_string);
                     match data {
                         Ok(data) => return Ok(data),
-                        Err(_) => return Err("Couldn't parse html response!".to_string()),
+                        Err(_) => return Err("Can't parse html response".to_string()),
                     }
                 }
             }
@@ -78,38 +125,6 @@ fn fetch_and_parse_data() -> Option<Data> {
     Some(data)
 }
 
-fn get_remaining_time(data: Data) -> String {
-    let now = Local::now().time();
-
-    let remaining_time = data
-        .times
-        .into_iter()
-        .filter_map(|time| NaiveTime::parse_from_str(&time, "%H:%M").ok()) // Filter out invalid times
-        .filter(|&time| time > now)
-        .fold(None, |closest_time, time| match closest_time {
-            Some(prev_time) => {
-                if time < prev_time {
-                    Some(time)
-                } else {
-                    Some(prev_time)
-                }
-            }
-            None => Some(time),
-        });
-
-    match remaining_time {
-        Some(time) => {
-            let duration = time.signed_duration_since(now);
-            format!(
-                "{}:{:02}",
-                duration.num_hours(),
-                duration.num_minutes() % 60
-            )
-        }
-        None => "??:??".to_string(),
-    }
-}
-
 fn should_update_file() -> bool {
     if !Path::new(FILE_PATH).exists() {
         return true;
@@ -122,7 +137,7 @@ fn should_update_file() -> bool {
             return now != last_modified;
         }
     } else {
-        eprintln!("Error opening the file.")
+        eprintln!("Error: Can't open the file.");
     }
 
     false
@@ -138,31 +153,17 @@ fn get_data_from_file() -> Option<Data> {
     match serde_json::from_str(&content) {
         Ok(data) => Some(data),
         Err(err) => {
-            eprintln!("Error parsing JSON: {}", err);
+            eprintln!("Error: Can't parse JSON: {}", err);
             None
         }
     }
 }
 
-fn update_data_file(data: &Data) -> Result<(), std::io::Error> {
-    let now = Local::now().format("%d/%m/%y").to_string();
-    let mut content = now + "\n";
-    content += &serde_json::to_string(&data).unwrap();
-
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .open(FILE_PATH)?;
-    file.write_all(content.as_bytes())?;
-
-    Ok(())
-}
-
 fn main() {
     if should_update_file() {
         if let Some(data) = fetch_and_parse_data() {
-            if let Err(err) = update_data_file(&data) {
-                eprintln!("Error updating file: {}", err);
+            if let Err(err) = data.update() {
+                eprintln!("Error: Can't update file: {}", err);
             }
         } else {
             eprintln!("Error: Failed to fetch and parse data.");
@@ -170,7 +171,7 @@ fn main() {
     }
 
     if let Some(data) = get_data_from_file() {
-        let remaining_time = get_remaining_time(data);
+        let remaining_time = data.get_remaining_time();
         println!("{}", remaining_time);
     } else {
         eprintln!("Error: Failed to get data from file.");
