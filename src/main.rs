@@ -3,7 +3,6 @@ use reqwest::blocking::Client;
 use select::document::Document;
 use select::predicate::Name;
 use serde::{Deserialize, Serialize};
-use serde_json;
 use std::fmt;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
@@ -14,8 +13,6 @@ use std::path::Path;
 struct Data {
     times: [String; 5],
     name: String,
-    localisation: String,
-    email: String,
     jumua: String,
     shuruq: String,
 }
@@ -76,21 +73,19 @@ impl fmt::Display for Data {
             "Data:\n\
             Times: {:?}\n\
             Name: {}\n\
-            Localisation: {}\n\
-            Email: {}\n\
             Jumua: {}\n\
             Shuruq: {}",
-            self.times, self.name, self.localisation, self.email, self.jumua, self.shuruq
+            self.times, self.name, self.jumua, self.shuruq
         )
     }
 }
 
 fn fetch_data() -> Result<reqwest::blocking::Response, reqwest::Error> {
-    let url = "https://mawaqit.net/fr/m-angouleme";
-    // let url = "https://mawaqit.net/fr/mosquee-dagen";
+    // let url = "https://mawaqit.net/fr/m-angouleme";
+    let url = "https://mawaqit.net/fr/mosquee-dagen";
 
     let client = Client::new();
-    return client.get(url).send();
+    client.get(url).send()
 }
 
 fn parse_data(doc: Document) -> Result<Data, String> {
@@ -102,8 +97,8 @@ fn parse_data(doc: Document) -> Result<Data, String> {
                 let json_string = line
                     .trim()
                     .trim_start_matches("var confData = ")
-                    .trim_end_matches(";");
-                if json_string.starts_with("{") {
+                    .trim_end_matches(';');
+                if json_string.starts_with('{') {
                     let data: Result<Data, serde_json::Error> = serde_json::from_str(json_string);
                     match data {
                         Ok(data) => return Ok(data),
@@ -111,6 +106,7 @@ fn parse_data(doc: Document) -> Result<Data, String> {
                     }
                 }
             }
+            return Err("Couldn't parse html response!".to_string());
         }
     }
     Err("Couldn't parse html response!".to_string())
