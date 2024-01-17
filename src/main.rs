@@ -38,29 +38,22 @@ impl Data {
             .times
             .into_iter()
             .filter_map(|time| NaiveTime::parse_from_str(&time, "%H:%M").ok()) // Filter out invalid times
-            .filter(|&time| time > now)
-            .fold(None, |closest_time, time| match closest_time {
-                Some(prev_time) => {
-                    if time < prev_time {
-                        Some(time)
-                    } else {
-                        Some(prev_time)
-                    }
-                }
-                None => Some(time),
-            });
+            .filter(|&time| time > now);
 
-        match remaining_time {
-            Some(time) => {
-                let duration = time.signed_duration_since(now);
-                format!(
-                    "{}:{:02}",
-                    duration.num_hours(),
-                    duration.num_minutes() % 60
-                )
-            }
-            None => "??:??".to_string(),
-        }
+        println!("{:?}", remaining_time);
+        // match remaining_time {
+        //     Some(time) => {
+        //         let duration = time.signed_duration_since(now);
+        //         format!(
+        //             "{}:{:02}",
+        //             duration.num_hours(),
+        //             duration.num_minutes() % 60
+        //         )
+        //     }
+        //     None => "??:??".to_string(),
+        // }
+        todo!("After isha figure out what needs to be done");
+        // "??:??".to_string()
     }
 }
 
@@ -81,7 +74,6 @@ impl fmt::Display for Data {
 }
 
 fn fetch_data() -> Result<reqwest::blocking::Response, reqwest::Error> {
-    // let url = "https://mawaqit.net/fr/m-angouleme";
     let url = "https://mawaqit.net/fr/mosquee-dagen";
 
     let client = Client::new();
