@@ -36,24 +36,21 @@ impl Data {
 
         let remaining_time = self
             .times
+            .clone()
             .into_iter()
             .filter_map(|time| NaiveTime::parse_from_str(&time, "%H:%M").ok()) // Filter out invalid times
-            .filter(|&time| time > now);
+            .filter(|&time| time > now)
+            .collect::<Vec<NaiveTime>>();
 
-        println!("{:?}", remaining_time);
-        // match remaining_time {
-        //     Some(time) => {
-        //         let duration = time.signed_duration_since(now);
-        //         format!(
-        //             "{}:{:02}",
-        //             duration.num_hours(),
-        //             duration.num_minutes() % 60
-        //         )
-        //     }
-        //     None => "??:??".to_string(),
-        // }
-        todo!("After isha figure out what needs to be done");
-        // "??:??".to_string()
+        if remaining_time.is_empty() {
+            return self.times[0].to_owned();
+        }
+        let duration = remaining_time[0] - now;
+        format!(
+            "{:02}:{:02}",
+            duration.num_hours(),
+            duration.num_minutes() % 60
+        )
     }
 }
 
@@ -132,19 +129,14 @@ fn should_update_file() -> bool {
 }
 
 fn get_data_from_file() -> Option<Data> {
-    let mut content = fs::read_to_string(FILE_PATH).ok()?;
+    let content = fs::read_to_string(FILE_PATH)
+        .ok()?
+        .lines()
+        .skip(1)
+        .collect::<Vec<_>>()
+        .join("\n");
 
-    let mut lines = content.lines();
-    lines.next();
-
-    content = lines.collect::<Vec<_>>().join("\n");
-    match serde_json::from_str(&content) {
-        Ok(data) => Some(data),
-        Err(err) => {
-            eprintln!("Error: Can't parse JSON: {}", err);
-            None
-        }
-    }
+    serde_json::from_str(&content).expect("String content should match Data object")
 }
 
 fn main() {
