@@ -1,3 +1,4 @@
+use anyhow::Result;
 use chrono::{Local, NaiveTime};
 use reqwest::blocking::Client;
 use select::document::Document;
