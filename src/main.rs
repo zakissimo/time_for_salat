@@ -4,6 +4,7 @@ use reqwest::blocking::Client;
 use select::document::Document;
 use select::predicate::Name;
 use serde::{Deserialize, Serialize};
+use std::env;
 use std::fmt;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
@@ -67,11 +68,18 @@ impl fmt::Display for Data {
     }
 }
 
-fn fetch_data() -> Result<reqwest::blocking::Response, reqwest::Error> {
-    let url = "https://mawaqit.net/fr/m/mosquee-al-fath-toulouse-31200-france";
+fn fetch_data() -> Result<reqwest::blocking::Response, String> {
+    let env_var = "MWQT";
 
-    let client = Client::new();
-    client.get(url).send()
+    let url =
+        env::var(env_var).map_err(|_| format!("{} environment variable is not set", env_var))?;
+
+    let response = Client::new()
+        .get(url)
+        .send()
+        .map_err(|e| format!("Failed to send request: {}", e))?;
+
+    Ok(response)
 }
 
 fn parse_data(doc: Document) -> Result<Data, String> {
