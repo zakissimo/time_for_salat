@@ -14,8 +14,6 @@ use std::path::Path;
 struct Data {
     times: [String; 5],
     name: String,
-    jumua: String,
-    shuruq: String,
 }
 
 impl Data {
@@ -55,7 +53,7 @@ impl Data {
     }
 }
 
-static FILE_PATH: &str = "/dev/shm/Time4Salat.log";
+const FILE_PATH: &str = "/dev/shm/Time4Salat.log";
 
 impl fmt::Display for Data {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -63,16 +61,14 @@ impl fmt::Display for Data {
             f,
             "Data:\n\
             Times: {:?}\n\
-            Name: {}\n\
-            Jumua: {}\n\
-            Shuruq: {}",
-            self.times, self.name, self.jumua, self.shuruq
+            Name: {}",
+            self.times, self.name,
         )
     }
 }
 
 fn fetch_data() -> Result<reqwest::blocking::Response, reqwest::Error> {
-    let url = "https://mawaqit.net/fr/mosquee-dagen";
+    let url = "https://mawaqit.net/fr/m/mosquee-al-fath-toulouse-31200-france";
 
     let client = Client::new();
     client.get(url).send()
