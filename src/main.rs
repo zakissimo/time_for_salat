@@ -54,7 +54,7 @@ impl Data {
     }
 }
 
-const FILE_PATH: &str = "/dev/shm/Time4Salat.log";
+const FILE_PATH: &str = "/tmp/Time4Salat.log";
 
 impl fmt::Display for Data {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
