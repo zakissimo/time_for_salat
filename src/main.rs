@@ -126,6 +126,7 @@ fn should_update_file() -> bool {
         if let Some(Ok(last_modified)) = reader.lines().next() {
             return now != last_modified;
         }
+        return true;
     } else {
         eprintln!("Error: Can't open the file.");
     }
