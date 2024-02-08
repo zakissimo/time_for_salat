@@ -1,9 +1,11 @@
 use anyhow::Result;
-use chrono::{Local, NaiveTime};
+use chrono::Datelike;
+use chrono::{Local, NaiveTime, Utc};
 use reqwest::blocking::Client;
 use select::document::Document;
 use select::predicate::Name;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::env;
 use std::fmt;
 use std::fs::{self, File, OpenOptions};
@@ -15,6 +17,7 @@ use std::path::Path;
 struct Data {
     times: [String; 5],
     name: String,
+    calendar: Vec<HashMap<String, Vec<String>>>,
 }
 
 impl Data {
@@ -34,8 +37,14 @@ impl Data {
     fn get_remaining_time(self) -> String {
         let now = Local::now().time();
 
-        let remaining_time = self
-            .times
+        let day = Utc::now().day();
+        let day_str = format!("{:}", day);
+        let month = Utc::now().month();
+        let times = self.calendar[month as usize - 1]
+            .get(&day_str)
+            .expect("The day should be in the calendar");
+
+        let remaining_time = times
             .clone()
             .into_iter()
             .filter_map(|time| NaiveTime::parse_from_str(&time, "%H:%M").ok()) // Filter out invalid times
@@ -43,7 +52,7 @@ impl Data {
             .collect::<Vec<NaiveTime>>();
 
         if remaining_time.is_empty() {
-            return self.times[0].to_owned();
+            return times[0].to_owned();
         }
         let duration = remaining_time[0] - now;
         format!(
@@ -54,7 +63,7 @@ impl Data {
     }
 }
 
-const FILE_PATH: &str = "/tmp/Time4Salat.log";
+const FILE_PATH: &str = "/tmp/time_4_salat.log";
 
 impl fmt::Display for Data {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -76,6 +85,7 @@ fn fetch_data() -> Result<reqwest::blocking::Response, String> {
 
     let response = Client::new()
         .get(url)
+        .header(reqwest::header::CACHE_CONTROL, "no-cache")
         .send()
         .map_err(|e| format!("Failed to send request: {}", e))?;
 
