@@ -1,88 +1,18 @@
 use anyhow::Result;
-use chrono::Datelike;
-use chrono::{Local, NaiveTime, Utc};
+use chrono::Local;
+use prayer_times::PrayerTimes;
 use reqwest::blocking::Client;
 use select::document::Document;
 use select::predicate::Name;
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::env;
-use std::fmt;
-use std::fs::{self, File, OpenOptions};
-use std::io::Write;
+use std::fs;
+use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
-#[derive(Debug, Deserialize, Serialize)]
-struct Data {
-    times: [String; 5],
-    name: String,
-    calendar: Vec<HashMap<String, Vec<String>>>,
-}
-
-impl Data {
-    fn update(&self) -> Result<(), std::io::Error> {
-        let now = Local::now().format("%d/%m/%y").to_string();
-        let content = now + "\n" + &serde_json::to_string(&self)?;
-
-        OpenOptions::new()
-            .write(true)
-            .create(true)
-            .open(FILE_PATH)?
-            .write_all(content.as_bytes())?;
-
-        Ok(())
-    }
-
-    fn get_remaining_time(self) -> String {
-        let now = Local::now().time();
-
-        let day = Utc::now().day();
-        let day_str = format!("{:}", day);
-        let month = Utc::now().month();
-        let times = self.calendar[month as usize - 1]
-            .get(&day_str)
-            .expect("The day should be in the calendar");
-
-        let remaining_time = times
-            .clone()
-            .into_iter()
-            .filter_map(|time| NaiveTime::parse_from_str(&time, "%H:%M").ok()) // Filter out invalid times
-            .filter(|&time| time > now)
-            .collect::<Vec<NaiveTime>>();
-
-        if remaining_time.is_empty() {
-            return times[0].to_owned();
-        }
-        let duration = remaining_time[0] - now;
-        format!(
-            "{:02}:{:02}",
-            duration.num_hours(),
-            duration.num_minutes() % 60
-        )
-    }
-}
-
 const FILE_PATH: &str = "/tmp/time_4_salat.log";
 
-impl fmt::Display for Data {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "Data:\n\
-            Times: {:?}\n\
-            Name: {}",
-            self.times, self.name,
-        )
-    }
-}
-
-fn fetch_data() -> Result<reqwest::blocking::Response, String> {
-    let env_var = "MWQT";
-
-    let url =
-        env::var(env_var).map_err(|_| format!("{} environment variable is not set", env_var))?;
-
+fn fetch_data(url: &str) -> Result<reqwest::blocking::Response, String> {
     let response = Client::new()
         .get(url)
         .header(reqwest::header::CACHE_CONTROL, "no-cache")
@@ -92,18 +22,19 @@ fn fetch_data() -> Result<reqwest::blocking::Response, String> {
     Ok(response)
 }
 
-fn parse_data(doc: Document) -> Result<Data, String> {
+fn parse_data(doc: Document) -> Result<PrayerTimes, String> {
     for element in doc.find(Name("script")) {
-        if element.inner_html().contains("var confData") {
+        if element.inner_html().contains("var confPrayerTimes") {
             let line = element.inner_html();
             let lines = line.split(';');
             for line in lines {
                 let json_string = line
                     .trim()
-                    .trim_start_matches("var confData = ")
+                    .trim_start_matches("var confPrayerTimes = ")
                     .trim_end_matches(';');
                 if json_string.starts_with('{') {
-                    let data: Result<Data, serde_json::Error> = serde_json::from_str(json_string);
+                    let data: Result<PrayerTimes, serde_json::Error> =
+                        serde_json::from_str(json_string);
                     match data {
                         Ok(data) => return Ok(data),
                         Err(_) => return Err("Can't parse html response".to_string()),
@@ -116,8 +47,8 @@ fn parse_data(doc: Document) -> Result<Data, String> {
     Err("Couldn't parse html response!".to_string())
 }
 
-fn fetch_and_parse_data() -> Option<Data> {
-    let r = fetch_data().ok()?;
+fn fetch_and_parse_data(url: &str) -> Option<PrayerTimes> {
+    let r = fetch_data(url).ok()?;
     let body = r.text().ok()?;
     let doc = Document::from(body.as_str());
     let data = parse_data(doc).ok()?;
@@ -137,14 +68,13 @@ fn should_update_file() -> bool {
             return now != last_modified;
         }
         return true;
-    } else {
-        eprintln!("Error: Can't open the file.");
     }
+    eprintln!("Error: Can't open the file.");
 
     false
 }
 
-fn get_data_from_file() -> Option<Data> {
+fn get_data_from_file() -> Option<PrayerTimes> {
     let content = fs::read_to_string(FILE_PATH)
         .ok()?
         .lines()
@@ -152,21 +82,35 @@ fn get_data_from_file() -> Option<Data> {
         .collect::<Vec<_>>()
         .join("\n");
 
-    serde_json::from_str(&content).expect("String content should match Data object")
+    serde_json::from_str(&content).expect("String content should match PrayerTimes object")
 }
 
 fn main() {
-    if should_update_file() {
-        if let Some(data) = fetch_and_parse_data() {
-            if let Err(err) = data.update() {
-                eprintln!("Error: Can't update file: {}", err);
+    let env_var = "MWQT";
+
+    match env::var(env_var) {
+        Ok(var) => {
+            let mut data = PrayerTimes::default();
+            data.file_path = FILE_PATH.to_string();
+
+            if should_update_file() {
+                if let Some(data) = fetch_and_parse_data(&var) {
+                    if let Err(err) = data.update() {
+                        eprintln!("Error: Can't update file: {}", err);
+                    }
+                } else {
+                    eprintln!("Error: Failed to fetch and parse data.");
+                }
             }
-        } else {
-            eprintln!("Error: Failed to fetch and parse data.");
+        }
+        Err(_) => {
+            println!("Environment variable {} is not set", env_var);
+            return;
         }
     }
 
-    if let Some(data) = get_data_from_file() {
+    if let Some(mut data) = get_data_from_file() {
+        data.file_path = FILE_PATH.to_string();
         let remaining_time = data.get_remaining_time();
         println!("{}", remaining_time);
     } else {
