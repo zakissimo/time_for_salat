@@ -2,15 +2,14 @@ use anyhow::Result;
 use chrono::Local;
 use prayer_times::PrayerTimes;
 use reqwest::blocking::Client;
-use select::document::Document;
-use select::predicate::Name;
+use scraper::{Html, Selector};
 use std::env;
 use std::fs;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
-const FILE_PATH: &str = "/tmp/time_4_salat.log";
+const FILE_PATH: &str = "/tmp/time_for_salat.log";
 
 fn fetch_data(url: &str) -> Result<reqwest::blocking::Response, String> {
     let response = Client::new()
@@ -22,38 +21,27 @@ fn fetch_data(url: &str) -> Result<reqwest::blocking::Response, String> {
     Ok(response)
 }
 
-fn parse_data(doc: Document) -> Result<PrayerTimes, String> {
-    for element in doc.find(Name("script")) {
-        if element.inner_html().contains("var confPrayerTimes") {
-            let line = element.inner_html();
-            let lines = line.split(';');
-            for line in lines {
-                let json_string = line
-                    .trim()
-                    .trim_start_matches("var confPrayerTimes = ")
-                    .trim_end_matches(';');
-                if json_string.starts_with('{') {
-                    let data: Result<PrayerTimes, serde_json::Error> =
-                        serde_json::from_str(json_string);
-                    match data {
-                        Ok(data) => return Ok(data),
-                        Err(_) => return Err("Can't parse html response".to_string()),
-                    }
-                }
-            }
-            return Err("Couldn't parse html response!".to_string());
-        }
-    }
-    Err("Couldn't parse html response!".to_string())
-}
-
 fn fetch_and_parse_data(url: &str) -> Option<PrayerTimes> {
     let r = fetch_data(url).ok()?;
     let body = r.text().ok()?;
-    let doc = Document::from(body.as_str());
-    let data = parse_data(doc).ok()?;
+    let doc = Html::parse_document(body.as_str());
 
-    Some(data)
+    let script_selector = Selector::parse("script").unwrap();
+
+    for script in doc.select(&script_selector) {
+        if let Some(line) = script
+            .text()
+            .filter(|e| e.contains("var confData"))
+            .find(|e| e.contains("var confData"))
+        {
+            if let (Some(start), Some(end)) = (line.find('{'), line.rfind('}')) {
+                let data: Result<PrayerTimes, serde_json::Error> =
+                    serde_json::from_str(&line[start..=end]);
+                return data.ok();
+            }
+        }
+    }
+    None
 }
 
 fn should_update_file() -> bool {
@@ -94,7 +82,8 @@ fn main() {
             data.file_path = FILE_PATH.to_string();
 
             if should_update_file() {
-                if let Some(data) = fetch_and_parse_data(&var) {
+                if let Some(mut data) = fetch_and_parse_data(&var) {
+                    data.file_path = FILE_PATH.to_string();
                     if let Err(err) = data.update() {
                         eprintln!("Error: Can't update file: {}", err);
                     }
