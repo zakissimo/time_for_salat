@@ -24,7 +24,7 @@ impl PrayerTimes {
 
         OpenOptions::new()
             .write(true)
-            .create(true)
+            .truncate(true)
             .open(&self.file_path)?
             .write_all(content.as_bytes())?;
 
