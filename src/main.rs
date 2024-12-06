@@ -46,6 +46,7 @@ fn fetch_and_parse_data(url: &str) -> Option<PrayerTimes> {
 
 fn should_update_file() -> bool {
     if !Path::new(FILE_PATH).exists() {
+        _ = fs::write(FILE_PATH, "");
         return true;
     }
 
