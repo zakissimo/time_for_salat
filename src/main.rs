@@ -1,56 +1,46 @@
-use anyhow::Result;
 use chrono::Local;
 use prayer_times::PrayerTimes;
 use reqwest::blocking::Client;
-use scraper::{Html, Selector};
 use std::env;
-use std::fs;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
 const FILE_PATH: &str = "/tmp/time_for_salat.log";
+const API_URL: &str = "https://mawaqit.net/api/2.0/mosque/search";
 
-fn fetch_data(url: &str) -> Result<reqwest::blocking::Response, String> {
+fn fetch_and_parse_data(slug: &str) -> Option<PrayerTimes> {
+    let url = format!("{}?word={}", API_URL, slug);
     let response = Client::new()
-        .get(url)
-        .header(reqwest::header::CACHE_CONTROL, "no-cache")
+        .get(&url)
         .send()
-        .map_err(|e| format!("Failed to send request: {}", e))?;
+        .ok()?
+        .json::<Vec<serde_json::Value>>()
+        .ok()?;
 
-    Ok(response)
-}
+    let entry = response.iter().find(|e| e["slug"].as_str() == Some(slug))?;
 
-fn fetch_and_parse_data(url: &str) -> Option<PrayerTimes> {
-    let r = fetch_data(url).ok()?;
-    let body = r.text().ok()?;
-    let doc = Html::parse_document(body.as_str());
+    let name = entry["name"].as_str()?.to_string();
+    let times_vec: Vec<String> = entry["times"]
+        .as_array()?
+        .iter()
+        .filter_map(|v| v.as_str().map(String::from))
+        .collect();
+    let times: [String; 6] = times_vec.try_into().ok()?;
 
-    let script_selector = Selector::parse("script").unwrap();
-
-    for script in doc.select(&script_selector) {
-        if let Some(line) = script
-            .text()
-            .filter(|e| e.contains("var confData"))
-            .find(|e| e.contains("var confData"))
-        {
-            if let (Some(start), Some(end)) = (line.find('{'), line.rfind('}')) {
-                let data: Result<PrayerTimes, serde_json::Error> =
-                    serde_json::from_str(&line[start..=end]);
-                return data.ok();
-            }
-        }
-    }
-    None
+    Some(PrayerTimes {
+        name,
+        slug: slug.to_string(),
+        times,
+    })
 }
 
 fn should_update_file() -> bool {
     if !Path::new(FILE_PATH).exists() {
-        _ = fs::write(FILE_PATH, "");
         return true;
     }
 
-    let now = Local::now().format("%d/%m/%y").to_string();
+    let now = Local::now().format("%d/%m/%Y").to_string();
     if let Ok(file) = File::open(FILE_PATH) {
         let reader = BufReader::new(file);
         if let Some(Ok(last_modified)) = reader.lines().next() {
@@ -63,46 +53,28 @@ fn should_update_file() -> bool {
     false
 }
 
-fn get_data_from_file() -> Option<PrayerTimes> {
-    let content = fs::read_to_string(FILE_PATH)
-        .ok()?
-        .lines()
-        .skip(1)
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    serde_json::from_str(&content).expect("String content should match PrayerTimes object")
-}
-
 fn main() {
-    let env_var = "MWQT";
-
-    match env::var(env_var) {
-        Ok(var) => {
-            let mut data = PrayerTimes::default();
-            data.file_path = FILE_PATH.to_string();
-
-            if should_update_file() {
-                if let Some(mut data) = fetch_and_parse_data(&var) {
-                    data.file_path = FILE_PATH.to_string();
-                    if let Err(err) = data.update() {
-                        eprintln!("Error: Can't update file: {}", err);
-                    }
-                } else {
-                    eprintln!("Error: Failed to fetch and parse data.");
-                }
-            }
-        }
-        Err(_) => {
-            println!("Environment variable {} is not set", env_var);
+    let slug = env::args().nth(1).or_else(|| env::var("MWQT").ok());
+    let slug = match slug {
+        Some(s) => s,
+        None => {
+            eprintln!("Usage: time_for_salat <slug> or set MWQT env var");
             return;
+        }
+    };
+
+    if should_update_file() {
+        if let Some(data) = fetch_and_parse_data(&slug) {
+            if let Err(err) = data.update(FILE_PATH) {
+                eprintln!("Error: Can't update file: {}", err);
+            }
+        } else {
+            eprintln!("Error: Failed to fetch and parse data.");
         }
     }
 
-    if let Some(mut data) = get_data_from_file() {
-        data.file_path = FILE_PATH.to_string();
-        let remaining_time = data.get_remaining_time();
-        println!("{}", remaining_time);
+    if let Some(data) = PrayerTimes::from_file(FILE_PATH, true) {
+        println!("{}", data.get_remaining_time());
     } else {
         eprintln!("Error: Failed to get data from file.");
     }

@@ -1,31 +1,37 @@
-use anyhow::Result;
-use chrono::Datelike;
-use chrono::{Local, NaiveTime, Utc};
+use chrono::{Local, NaiveTime};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::fmt;
+use std::fs;
 use std::fs::OpenOptions;
 use std::io::Write;
 
 #[derive(Default, Debug, Deserialize, Serialize)]
 pub struct PrayerTimes {
-    name: String,
-    times: [String; 5],
-    calendar: [HashMap<String, Vec<String>>; 12],
-    #[serde(skip_serializing)]
-    #[serde(skip_deserializing)]
-    pub file_path: String,
+    pub name: String,
+    pub slug: String,
+    pub times: [String; 6], // fajr, shuruq, dhuhr, asr, maghrib, isha
 }
 
 impl PrayerTimes {
-    pub fn update(&self) -> Result<(), std::io::Error> {
-        let now = Local::now().format("%d/%m/%y").to_string();
+    pub fn from_file(file_path: &str, skip_header: bool) -> Option<Self> {
+        let content: String = fs::read_to_string(file_path)
+            .ok()?
+            .lines()
+            .skip(if skip_header { 1 } else { 0 })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        serde_json::from_str(&content).ok()
+    }
+
+    pub fn update(&self, file_path: &str) -> Result<(), std::io::Error> {
+        let now = Local::now().format("%d/%m/%Y").to_string();
         let content = now + "\n" + &serde_json::to_string(&self)?;
 
         OpenOptions::new()
             .write(true)
             .truncate(true)
-            .open(&self.file_path)?
+            .create(true)
+            .open(file_path)?
             .write_all(content.as_bytes())?;
 
         Ok(())
@@ -34,40 +40,30 @@ impl PrayerTimes {
     pub fn get_remaining_time(&self) -> String {
         let now = Local::now().time();
 
-        let day = Utc::now().day();
-        let day_str = format!("{:}", day);
-        let month = Utc::now().month();
-        let times = self.calendar[month as usize - 1]
-            .get(&day_str)
-            .expect("The day should be in the calendar");
+        let next = self
+            .times
+            .iter()
+            .filter_map(|t| {
+                let parsed = NaiveTime::parse_from_str(t, "%H:%M").ok()?;
+                if parsed > now {
+                    Some((t.as_str(), parsed))
+                } else {
+                    None
+                }
+            })
+            .next();
 
-        let remaining_time = times
-            .clone()
-            .into_iter()
-            .filter_map(|time| NaiveTime::parse_from_str(&time, "%H:%M").ok()) // Filter out invalid times
-            .filter(|&time| time > now)
-            .collect::<Vec<NaiveTime>>();
-
-        if remaining_time.is_empty() {
-            return times[0].to_owned();
+        match next {
+            Some((time_str, parsed)) => {
+                let total_minutes = (parsed - now).num_minutes();
+                let duration = if total_minutes >= 60 {
+                    format!("{}h{:02}m", total_minutes / 60, total_minutes % 60)
+                } else {
+                    format!("{}m", total_minutes)
+                };
+                format!("{} ({})", time_str, duration)
+            }
+            None => format!("{} (fajr)", &self.times[0]),
         }
-        let duration = remaining_time[0] - now;
-        format!(
-            "{:02}:{:02}",
-            duration.num_hours(),
-            duration.num_minutes() % 60
-        )
-    }
-}
-
-impl fmt::Display for PrayerTimes {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "Data:\n\
-            Times: {:?}\n\
-            Name: {}",
-            self.times, self.name,
-        )
     }
 }
