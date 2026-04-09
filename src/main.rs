@@ -35,7 +35,7 @@ fn fetch_and_parse_data(slug: &str) -> Option<PrayerTimes> {
     })
 }
 
-fn should_update_file() -> bool {
+fn should_update_file(slug: &str) -> bool {
     if !Path::new(FILE_PATH).exists() {
         return true;
     }
@@ -44,13 +44,18 @@ fn should_update_file() -> bool {
     if let Ok(file) = File::open(FILE_PATH) {
         let reader = BufReader::new(file);
         if let Some(Ok(last_modified)) = reader.lines().next() {
-            return now != last_modified;
+            if now != last_modified {
+                return true;
+            }
+        } else {
+            return true;
         }
-        return true;
     }
-    eprintln!("Error: Can't open the file.");
 
-    false
+    match PrayerTimes::from_file(FILE_PATH, true) {
+        Some(cached) => cached.slug != slug,
+        None => true,
+    }
 }
 
 fn main() {
@@ -63,7 +68,7 @@ fn main() {
         }
     };
 
-    if should_update_file() {
+    if should_update_file(&slug) {
         if let Some(data) = fetch_and_parse_data(&slug) {
             if let Err(err) = data.update(FILE_PATH) {
                 eprintln!("Error: Can't update file: {}", err);
